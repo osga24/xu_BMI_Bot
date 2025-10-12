@@ -147,8 +147,8 @@ bot.start((ctx) =>
 );
 
 bot.command('bmi', (ctx) => {
-	userState.set(ctx.chat.id, { step: 'height' });
-	ctx.reply('請輸入身高（公分）');
+	ctx.reply('請"回覆"身高與體重（例如：182 52 或 182,52）');
+	userState.set(ctx.chat.id, { step: 'bmiInput' });
 });
 
 bot.command('cancel', (ctx) => {
@@ -168,36 +168,35 @@ bot.on('message', async (ctx) => {
 	if (!state) return;
 
 	const text = ctx.message.text?.trim();
-	if (!text) return ctx.reply('請輸入文字數字');
+	if (!text) return ctx.reply('請輸入身高與體重');
 
-	// << 攔截 >>
-	if (/^stop$/i.test(text) || text === '取消' || text === '/stop') {
+	// 可輸入 stop 或 取消 結束
+	if (/^stop$/i.test(text) || text === '取消') {
 		userState.delete(ctx.chat.id);
 		return ctx.reply('流程已停止。');
 	}
-	// << 攔截結束，以下保持你的原本流程 >>
 
-	if (state.step === 'height') {
-		const h = parseFloat(text);
-		if (isNaN(h) || h <= 0) return ctx.reply('請輸入正確身高（公分）');
-		state.height = h;
-		state.step = 'weight';
-		return ctx.reply('請輸入體重（公斤）');
-	}
+	if (state.step === 'bmiInput') {
+		// 擷取兩個數字
+		const match = text.match(/([\d.]+)[, ]+([\d.]+)/);
+		if (!match) return ctx.reply('格式錯誤，請輸入例如：170 65');
+		const height = parseFloat(match[1]);
+		const weight = parseFloat(match[2]);
+		if (isNaN(height) || isNaN(weight) || height <= 0 || weight <= 0)
+			return ctx.reply('請輸入正確的數字');
 
-	if (state.step === 'weight') {
-		const w = parseFloat(text);
-		if (isNaN(w) || w <= 0) return ctx.reply('請輸入正確體重（公斤）');
-
-		const bmi = w / ((state.height / 100) ** 2);
+		// 計算 BMI
+		const bmi = weight / ((height / 100) ** 2);
 		const v = +bmi.toFixed(1);
 
+		// 體重分類
 		let status = '';
 		if (v < 18.5) status = '過輕';
 		else if (v < 24) status = '正常';
 		else status = '過重';
 
-		const military = classifyMilitary(state.height, v);
+		// 兵役體位 + 距離免役
+		const military = classifyMilitary(height, v);
 		const dist = distanceToExemptionBMI(v);
 		let distText = '';
 		if (dist.reached) {
@@ -216,12 +215,13 @@ bot.on('message', async (ctx) => {
 ${distText}`;
 		await ctx.reply(replyText);
 
+		// 寫入週 JSON
 		await appendWeeklyLog({
 			chat_id: ctx.chat.id,
 			user_id: ctx.from.id,
 			username: ctx.from.username || `${ctx.from.first_name || ''} ${ctx.from.last_name || ''}`.trim(),
-			height: state.height,
-			weight: w,
+			height,
+			weight,
 			bmi: v,
 			military_rank: military.rank,
 			created_at: new Date().toISOString(),
