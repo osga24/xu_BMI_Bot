@@ -135,6 +135,13 @@ if (!process.env.TG_TOKEN) {
 
 const userState = new Map();
 
+bot.command('id', (ctx) => {
+	ctx.reply(`你的 user ID: ${ctx.from.id}\n這個聊天室 ID: ${ctx.chat.id}`);
+});
+
+
+// Main BMI
+
 bot.start((ctx) =>
 	ctx.reply('嗨！輸入 /bmi 開始計算 BMI；/today 看今天筆數；/cancel 取消流程。')
 );
@@ -155,12 +162,20 @@ bot.command('today', async (ctx) => {
 });
 
 // 只在流程中處理輸入
+// === 2) 在流程訊息處理最前面先攔截 stop/取消 ===  // NEW
 bot.on('message', async (ctx) => {
 	const state = userState.get(ctx.chat.id);
 	if (!state) return;
 
 	const text = ctx.message.text?.trim();
 	if (!text) return ctx.reply('請輸入文字數字');
+
+	// << 攔截 >>
+	if (/^stop$/i.test(text) || text === '取消' || text === '/stop') {
+		userState.delete(ctx.chat.id);
+		return ctx.reply('流程已停止。');
+	}
+	// << 攔截結束，以下保持你的原本流程 >>
 
 	if (state.step === 'height') {
 		const h = parseFloat(text);
@@ -177,13 +192,11 @@ bot.on('message', async (ctx) => {
 		const bmi = w / ((state.height / 100) ** 2);
 		const v = +bmi.toFixed(1);
 
-		// 體重狀態
 		let status = '';
 		if (v < 18.5) status = '過輕';
 		else if (v < 24) status = '正常';
 		else status = '過重';
 
-		// 兵役體位 + 距離免役
 		const military = classifyMilitary(state.height, v);
 		const dist = distanceToExemptionBMI(v);
 		let distText = '';
@@ -203,7 +216,6 @@ bot.on('message', async (ctx) => {
 ${distText}`;
 		await ctx.reply(replyText);
 
-		// 記錄到當週 JSON
 		await appendWeeklyLog({
 			chat_id: ctx.chat.id,
 			user_id: ctx.from.id,
