@@ -90,6 +90,36 @@ async function countTodayFromWeekly(chatId, now = new Date()) {
 	return c;
 }
 
+// ---------------------- 倒數計算（新增） ----------------------
+function calculateDaysUntil(endDateStr) {
+	// endDateStr 格式：MM/DD (例如 "11/28")
+	if (!endDateStr) return null;
+
+	const [month, day] = endDateStr.split('/').map(n => parseInt(n, 10));
+	if (!month || !day) return null;
+
+	const now = tzDate();
+	const currentYear = now.getFullYear();
+
+	// 建立目標日期（當年）
+	let targetDate = new Date(currentYear, month - 1, day);
+	targetDate.setHours(0, 0, 0, 0);
+
+	// 如果目標日期已過，則設為明年
+	const nowMidnight = new Date(now);
+	nowMidnight.setHours(0, 0, 0, 0);
+
+	if (targetDate < nowMidnight) {
+		targetDate = new Date(currentYear + 1, month - 1, day);
+	}
+
+	// 計算天數差
+	const diffMs = targetDate - nowMidnight;
+	const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+	return days;
+}
+
 // ---------------------- Telegram mention 工具（MarkdownV2） ----------------------
 function escapeMd(s) {
 	return s.replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1');
@@ -143,7 +173,7 @@ bot.command('id', (ctx) => {
 // Main BMI
 
 bot.start((ctx) =>
-	ctx.reply('嗨！輸入 /bmi 開始計算 BMI；/today 看今天筆數；/cancel 取消流程。')
+	ctx.reply('嗨！輸入 /bmi 開始計算 BMI；/today 看今天筆數；/day 看倒數天數；/cancel 取消流程。')
 );
 
 bot.command('bmi', (ctx) => {
@@ -161,8 +191,18 @@ bot.command('today', async (ctx) => {
 	ctx.reply(`本聊天室今天共有 ${n} 筆記錄。`);
 });
 
+bot.command('day', (ctx) => {
+	const daysLeft = calculateDaysUntil(END_DAY);
+	if (daysLeft === null) {
+		return ctx.reply('未設定目標日期（END_DAY）。');
+	}
+	if (daysLeft === 0) {
+		return ctx.reply(`📅 今天就是 ${END_DAY}！`);
+	}
+	ctx.reply(`📅 距離 ${END_DAY} 還有 ${daysLeft} 天`);
+});
+
 // 只在流程中處理輸入
-// === 2) 在流程訊息處理最前面先攔截 stop/取消 ===  // NEW
 bot.on('message', async (ctx) => {
 	const state = userState.get(ctx.chat.id);
 	if (!state) return;
@@ -235,6 +275,8 @@ ${distText}`;
 const REMIND_CHAT_ID = Number(process.env.REMIND_CHAT_ID);
 const REMIND_USER_ID = Number(process.env.REMIND_USER_ID);
 const REMIND_TIME = process.env.REMIND_TIME || '09:30';
+const END_DAY = process.env.END_DAY; // 例如 "11/28"
+
 const [HH, MM] = REMIND_TIME.split(':').map(n => parseInt(n, 10));
 const cronExpr = `${MM} ${HH} * * *`;
 
@@ -242,7 +284,14 @@ cron.schedule(cronExpr, async () => {
 	try {
 		const count = await countTodayFromWeekly(REMIND_CHAT_ID);
 		const mention = mentionUserMd(REMIND_USER_ID, '小徐');
-		const msg = `${mention} 每日提醒：記得回報 BMI 或健康紀錄！\n（本聊天室今天已有 ${count} 筆）`;
+
+		// 計算倒數天數
+		const daysLeft = calculateDaysUntil(END_DAY);
+		const countdownText = daysLeft !== null
+			? `\n📅 距離 ${END_DAY} 還有 *${daysLeft}* 天`
+			: '';
+
+		const msg = `${mention} 每日提醒：記得回報 BMI 或健康紀錄！\n（本聊天室今天已有 ${count} 筆）${countdownText}`;
 		await bot.telegram.sendMessage(REMIND_CHAT_ID, msg, { parse_mode: 'MarkdownV2' });
 		console.log(`[reminder] sent at ${REMIND_TIME} Asia/Taipei`);
 	} catch (e) {
